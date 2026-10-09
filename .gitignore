@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# SQLite (runtime artifact — recreated on first run)
+edge_node/local_cache.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Models (large binary files)
+*.gguf
+*.bin
+*.safetensors
+models/
+
+# Docker volumes
+rabbitmq_data/
+prometheus_data/
+grafana_data/
+
+# Env files
+.env
+.env.*
+
+# Logs
+*.log

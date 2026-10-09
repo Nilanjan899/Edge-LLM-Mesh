@@ -1,0 +1,19 @@
+# Prometheus Configuration — Edge-LLM Telemetry Mesh
+# Scrapes metrics from both the FastAPI API and the RabbitMQ consumer.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # FastAPI ingest API metrics
+  - job_name: "edge-api"
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: "/metrics"
+
+  # Consumer-side Prometheus exporter
+  - job_name: "edge-consumer"
+    static_configs:
+      - targets: ["consumer:9091"]
+    metrics_path: "/metrics"

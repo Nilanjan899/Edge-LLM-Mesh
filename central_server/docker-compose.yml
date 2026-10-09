@@ -1,0 +1,136 @@
+# =============================================================================
+# Edge-LLM Mesh — Central Server Docker Compose Stack
+# =============================================================================
+# Spins up:
+#   1. RabbitMQ       — message broker (AMQP 5672, Management UI 15672)
+#   2. FastAPI         — telemetry ingest API (port 8000)
+#   3. Consumer        — RabbitMQ consumer → Prometheus exporter (port 9091)
+#   4. Prometheus      — metrics aggregation (port 9090)
+#   5. Grafana         — dashboards & visualization (port 3000)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+# =============================================================================
+
+version: "3.9"
+
+networks:
+  edge_mesh:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # RabbitMQ — Message Broker
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: edge-rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - edge_mesh
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # FastAPI — Telemetry Ingest API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: edge-api
+    ports:
+      - "8000:8000"
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - edge_mesh
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Consumer — RabbitMQ → Prometheus Exporter
+  # ---------------------------------------------------------------------------
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    container_name: edge-consumer
+    ports:
+      - "9091:9091"
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      METRICS_PORT: "9091"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - edge_mesh
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — Metrics Aggregation
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: edge-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    depends_on:
+      - api
+      - consumer
+    networks:
+      - edge_mesh
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Grafana — Dashboards & Visualization
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: edge-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: edgemesh
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - edge_mesh
+    restart: unless-stopped
