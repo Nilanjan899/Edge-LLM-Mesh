@@ -145,7 +145,7 @@ Open a **new Kaggle Notebook** with **GPU T4 ×2** accelerator and paste these c
 !git clone https://github.com/ggerganov/llama.cpp /kaggle/working/llama.cpp
 %cd /kaggle/working/llama.cpp
 !pip install -q -r requirements.txt
-!cmake -B build -DGGML_CUDA=ON
+!cmake -B build -DGGML_CUDA=ON -DCMAKE_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 !cmake --build build --config Release -j$(nproc)
 ```
 
