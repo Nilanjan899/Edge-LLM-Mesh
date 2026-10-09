@@ -339,3 +339,24 @@ rate(edge_telemetry_ingested_total[5m]) * 60
 ## 📜 License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## 📸 Screenshots
+
+### RabbitMQ Management UI
+![RabbitMQ](RabbitMQ.jpg)
+
+### Prometheus
+**Graph View:**
+![Prometheus Graph](prometheus_graph_edge_generation_speed_tokens_per_sec.jpg)
+
+**Table View:**
+![Prometheus Table](prometheus_table_edge_generation_speed_tokens_per_sec.jpg)
+
+### Grafana Dashboards
+![Grafana](grafana.jpg)
+
+**Peak Token Generation Speed:**
+![Grafana Peak Token Speed](grafana_tokens_peak_3.83.jpg)
+*The peak token generation speed achieved in my local machine was 3.83.*
