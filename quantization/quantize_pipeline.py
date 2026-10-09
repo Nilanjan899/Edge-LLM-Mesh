@@ -14,11 +14,12 @@ Cell 1 — Clone repository & install deps:
     %cd /kaggle/working/Edge-LLM-Mesh/quantization
     !pip install -q -r requirements.txt
 
-Cell 2 — Build llama.cpp (needed for convert scripts):
+Cell 2 — Build llama.cpp with CMake (the old Makefile has been removed):
     !git clone https://github.com/ggerganov/llama.cpp /kaggle/working/llama.cpp
     %cd /kaggle/working/llama.cpp
     !pip install -q -r requirements.txt
-    !make -j$(nproc) GGML_CUDA=1
+    !cmake -B build -DGGML_CUDA=ON
+    !cmake --build build --config Release -j$(nproc)
 
 Cell 3 — Run the pipeline:
     %cd /kaggle/working/Edge-LLM-Mesh/quantization
@@ -29,8 +30,10 @@ Cell 3 — Run the pipeline:
 
 Cell 4 — Verify & download artifact:
     import os
-    for f in os.listdir("/kaggle/working/quantized_models"):
-        print(f, "→", round(os.path.getsize(f"/kaggle/working/quantized_models/{f}") / 1e9, 2), "GB")
+    output_dir = "/kaggle/working/quantized_models"
+    for f in os.listdir(output_dir):
+        size_gb = os.path.getsize(os.path.join(output_dir, f)) / 1e9
+        print(f"{f} → {size_gb:.2f} GB")
 ----------------------------------------------------------------------
 """
 
@@ -63,7 +66,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL_ID: str = "microsoft/Phi-3-mini-4k-instruct"
 DEFAULT_QUANT_TYPE: str = "q4_k_m"
 DEFAULT_OUTPUT_DIR: str = "/kaggle/working/quantized_models"
-LLAMA_CPP_DIR: str = "/kaggle/working/llama.cpp"
+DEFAULT_LLAMA_CPP_DIR: str = "/kaggle/working/llama.cpp"
 
 # Supported quantization types (llama.cpp naming convention)
 SUPPORTED_QUANT_TYPES: list[str] = [
@@ -115,22 +118,83 @@ def download_model(model_id: str, cache_dir: str) -> Path:
     return Path(local_dir)
 
 
-def convert_to_gguf(model_dir: Path, output_dir: Path) -> Path:
+def _find_convert_script(llama_cpp_dir: str) -> str:
+    """Locate the ``convert_hf_to_gguf.py`` script inside the llama.cpp tree.
+
+    The script has moved between llama.cpp versions, so we check multiple
+    known locations and return the first match.
+
+    Args:
+        llama_cpp_dir: Root directory of the cloned llama.cpp repository.
+
+    Returns:
+        Absolute path to the convert script.
+
+    Raises:
+        FileNotFoundError: If the script cannot be found at any known location.
+    """
+    candidates = [
+        os.path.join(llama_cpp_dir, "convert_hf_to_gguf.py"),
+        os.path.join(llama_cpp_dir, "scripts", "convert_hf_to_gguf.py"),
+        os.path.join(llama_cpp_dir, "gguf-py", "scripts", "convert_hf_to_gguf.py"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"convert_hf_to_gguf.py not found in {llama_cpp_dir}. "
+        f"Searched: {candidates}"
+    )
+
+
+def _find_quantize_binary(llama_cpp_dir: str) -> str:
+    """Locate the ``llama-quantize`` binary built by CMake.
+
+    CMake places binaries in ``build/bin/`` by default, but we also check
+    the repo root for legacy Makefile builds.
+
+    Args:
+        llama_cpp_dir: Root directory of the cloned llama.cpp repository.
+
+    Returns:
+        Absolute path to the llama-quantize binary.
+
+    Raises:
+        FileNotFoundError: If the binary cannot be found.
+    """
+    candidates = [
+        os.path.join(llama_cpp_dir, "build", "bin", "llama-quantize"),
+        os.path.join(llama_cpp_dir, "build", "llama-quantize"),
+        os.path.join(llama_cpp_dir, "llama-quantize"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"llama-quantize binary not found. "
+        f"Searched: {candidates}. "
+        "Ensure llama.cpp was built with: "
+        "cmake -B build -DGGML_CUDA=ON && cmake --build build --config Release -j$(nproc)"
+    )
+
+
+def convert_to_gguf(
+    model_dir: Path,
+    output_dir: Path,
+    llama_cpp_dir: str,
+) -> Path:
     """Convert a HuggingFace model directory to F16 GGUF using llama.cpp.
 
     Args:
         model_dir: Path to the downloaded HuggingFace model.
         output_dir: Directory where the intermediate F16 GGUF will be written.
+        llama_cpp_dir: Root directory of the compiled llama.cpp repository.
 
     Returns:
         Path to the generated F16 GGUF file.
     """
-    convert_script = os.path.join(LLAMA_CPP_DIR, "convert_hf_to_gguf.py")
-    if not os.path.isfile(convert_script):
-        raise FileNotFoundError(
-            f"llama.cpp convert script not found at {convert_script}. "
-            "Ensure llama.cpp is cloned to /kaggle/working/llama.cpp."
-        )
+    convert_script = _find_convert_script(llama_cpp_dir)
+    logger.info("Using convert script: %s", convert_script)
 
     f16_path = output_dir / "model-f16.gguf"
     _run(
@@ -147,13 +211,19 @@ def convert_to_gguf(model_dir: Path, output_dir: Path) -> Path:
     return f16_path
 
 
-def quantize_gguf(f16_path: Path, quant_type: str, output_dir: Path) -> Path:
+def quantize_gguf(
+    f16_path: Path,
+    quant_type: str,
+    output_dir: Path,
+    llama_cpp_dir: str,
+) -> Path:
     """Quantize an F16 GGUF to a smaller representation.
 
     Args:
         f16_path: Path to the F16 GGUF file.
         quant_type: llama.cpp quantization type string (e.g. ``q4_k_m``).
         output_dir: Directory for the final quantized GGUF file.
+        llama_cpp_dir: Root directory of the compiled llama.cpp repository.
 
     Returns:
         Path to the quantized GGUF artifact.
@@ -163,12 +233,8 @@ def quantize_gguf(f16_path: Path, quant_type: str, output_dir: Path) -> Path:
             f"Unsupported quant type '{quant_type}'. Choose from: {SUPPORTED_QUANT_TYPES}"
         )
 
-    quantize_bin = os.path.join(LLAMA_CPP_DIR, "llama-quantize")
-    if not os.path.isfile(quantize_bin):
-        raise FileNotFoundError(
-            f"llama-quantize binary not found at {quantize_bin}. "
-            "Ensure llama.cpp was compiled with `make -j$(nproc) GGML_CUDA=1`."
-        )
+    quantize_bin = _find_quantize_binary(llama_cpp_dir)
+    logger.info("Using quantize binary: %s", quantize_bin)
 
     quant_path = output_dir / f"model-{quant_type}.gguf"
     _run([quantize_bin, str(f16_path), str(quant_path), quant_type.upper()])
@@ -228,15 +294,12 @@ def main() -> None:
     parser.add_argument(
         "--llama-cpp-dir",
         type=str,
-        default=LLAMA_CPP_DIR,
-        help=f"Path to compiled llama.cpp repo (default: {LLAMA_CPP_DIR})",
+        default=DEFAULT_LLAMA_CPP_DIR,
+        help=f"Path to compiled llama.cpp repo (default: {DEFAULT_LLAMA_CPP_DIR})",
     )
     args = parser.parse_args()
 
-    # Allow overriding the global constant via CLI
-    global LLAMA_CPP_DIR  # noqa: PLW0603
-    LLAMA_CPP_DIR = args.llama_cpp_dir
-
+    llama_cpp_dir: str = args.llama_cpp_dir
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -252,13 +315,13 @@ def main() -> None:
     logger.info("=" * 60)
     logger.info("STEP 2/3  ·  Converting to F16 GGUF")
     logger.info("=" * 60)
-    f16_path = convert_to_gguf(model_dir, output_dir)
+    f16_path = convert_to_gguf(model_dir, output_dir, llama_cpp_dir)
 
     # ---- Step 3: Quantize ----
     logger.info("=" * 60)
     logger.info("STEP 3/3  ·  Quantizing to %s", args.quant_type)
     logger.info("=" * 60)
-    quant_path = quantize_gguf(f16_path, args.quant_type, output_dir)
+    quant_path = quantize_gguf(f16_path, args.quant_type, output_dir, llama_cpp_dir)
 
     # ---- Cleanup ----
     if not args.keep_f16:

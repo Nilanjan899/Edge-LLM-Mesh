@@ -2,7 +2,11 @@
 # Quantization Pipeline Dependencies (Kaggle T4 GPU Environment)
 # ============================================================
 # Install inside a Kaggle notebook with:
-#   !pip install -r requirements.txt
+#   !pip install -q -r requirements.txt
+#
+# NOTE: Do NOT pin protobuf here — Kaggle pre-installs a version
+# that many other packages depend on.  HuggingFace Hub pulls in
+# whatever protobuf version it needs transitively.
 # ============================================================
 
 torch>=2.1.0
@@ -11,5 +15,4 @@ accelerate>=0.25.0
 safetensors>=0.4.0
 huggingface-hub>=0.20.0
 sentencepiece>=0.1.99
-protobuf>=4.25.0
 tqdm>=4.66.0

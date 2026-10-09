@@ -140,12 +140,13 @@ Open a **new Kaggle Notebook** with **GPU T4 ×2** accelerator and paste these c
 !pip install -q -r requirements.txt
 ```
 
-**Cell 2 — Build llama.cpp:**
+**Cell 2 — Build llama.cpp (CMake):**
 ```bash
 !git clone https://github.com/ggerganov/llama.cpp /kaggle/working/llama.cpp
 %cd /kaggle/working/llama.cpp
 !pip install -q -r requirements.txt
-!make -j$(nproc) GGML_CUDA=1
+!cmake -B build -DGGML_CUDA=ON
+!cmake --build build --config Release -j$(nproc)
 ```
 
 **Cell 3 — Run Quantization:**
